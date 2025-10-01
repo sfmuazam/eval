@@ -12,18 +12,14 @@ except Exception:
 
 log = logging.getLogger("llm")
 
-
 @dataclass
 class LLMResponse:
     content: str
 
-
-# ---------------- Mock (fallback dev) ----------------
 class MockLLM:
     def __init__(self):
         self.last_raw = {"backend": "mock"}
 
-    # --- helper kecil untuk deteksi tipe prompt ---
     @staticmethod
     def _contains_any(s: str, keys: list[str]) -> bool:
         s = (s or "").lower()
@@ -32,47 +28,19 @@ class MockLLM:
     def generate_json(self, prompt: str, **kwargs):
         p = (prompt or "")
 
-        # P4 — summarizer (deteksi dulu supaya tidak tertangkap P2/P3)
-        if self._contains_any(p, ['overall_summary', 'Return JSON ONLY with this exact schema']):
+        if self._contains_any(p, ['overall_summary', 'return json only with this exact schema']):
             return {
-                "overall_summary": (
-                    "Ringkasan umum berbasis mode mock (tanpa LLM). "
-                    "Gunakan evaluasi penuh untuk penilaian akurat."
-                ),
+                "overall_summary": "Mock summary without a live LLM.",
                 "recommendation": "hold",
-                "strengths": ["Data belum dievaluasi oleh model."],
-                "gaps": ["Diperlukan penilaian berbasis LLM atau manusia."],
-                "next_steps": ["Jalankan ulang dengan LLM aktif atau lakukan review manual."]
+                "strengths": ["stable mock path"],
+                "gaps": ["no model reasoning"],
+                "next_steps": ["enable LLM or review manually"]
             }
-
-        # P3 — project scorer
-        if self._contains_any(p, [
-            "project scorer", "project score", "[project_text]", "project rubric"
-        ]):
-            return {
-                "corr": 3,   # skor netral
-                "code": 3,
-                "res": 3,
-                "docs": 3,
-                "bonus": 3,
-                "feedback": "Penilaian umum (mock): butuh LLM untuk ulasan mendalam."
-            }
-
-        # P2 — CV scorer
-        if self._contains_any(p, [
-            "cv scorer", "cv scores", "score the candidate's cv", "[extracted_cv_json]"
-        ]):
-            return {
-                "skills": 3,
-                "exp": 3,
-                "ach": 3,
-                "culture": 3,
-                "feedback": "Penilaian umum (mock): aktifkan LLM untuk feedback spesifik."
-            }
-
-        if self._contains_any(p, [
-            "information extractor", "fields (all required)", "return a strict json object"
-        ]):
+        if self._contains_any(p, ["project scorer", "project score", "[project_text]", "project rubric"]):
+            return {"corr":3, "code":3, "res":3, "docs":3, "bonus":3, "feedback":"Mock project feedback."}
+        if self._contains_any(p, ["cv scorer", "cv scores", "score the candidate's cv", "[extracted_cv_json]"]):
+            return {"skills":3, "exp":3, "ach":3, "culture":3, "feedback":"Mock CV feedback."}
+        if self._contains_any(p, ["information extractor", "fields (all required)", "return a strict json object"]):
             return {
                 "skills_backend": [],
                 "skills_db": [],
@@ -82,57 +50,44 @@ class MockLLM:
                 "experience_years": 0.0,
                 "projects": []
             }
-
-        # default: JSON kosong (tetap valid)
         return {}
 
     def generate(self, prompt: str, **kwargs):
-        # Untuk path 'plain text', tetap jawab singkat dan netral.
         class R:
             content = "ok"
         self.last_raw = {"backend": "mock", "prompt": prompt}
         return R()
 
-# ---------------- Groq (OpenAI-compatible) ----------------
 class GroqLLM:
-    def __init__(self,
-                 api_key: Optional[str] = None,
-                 model: Optional[str] = None,
-                 base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None):
         if httpx is None:
-            raise RuntimeError("httpx belum terpasang. `pip/uv install httpx`.")
+            raise RuntimeError("httpx is not installed.")
         self.api_key = api_key or GROQ_API_KEY
         if not self.api_key:
-            raise RuntimeError("GROQ_API_KEY tidak diset.")
+            raise RuntimeError("GROQ_API_KEY is not set.")
         self.model = model or LLM_MODEL
         self.base_url = (base_url or os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")).rstrip("/")
         self.timeout = float(LLM_TIMEOUT_SEC)
         self.retries = int(LLM_RETRIES)
-        self.failopen = LLM_FAILOPEN == "1"
+        self.failopen = bool(LLM_FAILOPEN)
 
         self._timeout = httpx.Timeout(connect=self.timeout, read=self.timeout, write=self.timeout, pool=self.timeout)
         self._client = httpx.Client(timeout=self._timeout, trust_env=True)
 
         self.last_error: str | None = None
-        self.last_raw: str | None = None  # capture raw last response text
+        self.last_raw: str | None = None
 
         log.info(f"[LLM] Groq init model={self.model} base={self.base_url} timeout={self.timeout}s retries={self.retries} failopen={self.failopen}")
 
     def _chat_once(self, messages, temperature: float, max_tokens: int, force_json: bool) -> str:
         url = f"{self.base_url}/chat/completions"
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
+        payload = {"model": self.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
         if force_json:
             payload["response_format"] = {"type": "json_object"}
 
         r = self._client.post(url, headers=headers, json=payload)
 
-        # Fallback jika server tidak support response_format
         if r.status_code == 400 and force_json:
             log.warning("[LLM] 400 with response_format=json_object; retrying without response_format")
             payload.pop("response_format", None)
@@ -192,7 +147,6 @@ class GroqLLM:
         try:
             return json.loads(text)
         except Exception:
-            # Fallback: ekstrak blok { ... }
             m = re.search(r"\{.*\}", text, flags=re.S)
             if m:
                 try:
@@ -201,18 +155,14 @@ class GroqLLM:
                     pass
             return {}
 
-
-# ---------------- Selector ----------------
 def get_llm():
     backend = (LLM_PROVIDER or "").lower()
-    if backend == "mock":
-        log.info("[LLM] using MockLLM (env override)")
-        return MockLLM()
-    if backend == "groq" or os.getenv("GROQ_API_KEY"):
+    if backend == "groq":
         try:
             return GroqLLM()
         except Exception as e:
-            log.error(f"[LLM] Groq init failed: {e}. Fallback MockLLM.")
-            return MockLLM()
-    # default
+            if LLM_FAILOPEN:
+                log.error(f"[LLM] Groq init failed: {e}. Fallback to MockLLM.")
+                return MockLLM()
+            raise
     return MockLLM()

@@ -1,5 +1,6 @@
 from datetime import datetime, date, timedelta
 import json
+import os
 from typing import Any, List, Optional, TypeVar
 import uuid
 from random import choice
@@ -20,15 +21,35 @@ def generate_token() -> str:
     token = "".join(choice(ascii_lowercase + digits) for _ in range(25))
     return token
 
-def str_to_bool(string: str) -> bool:
-    if string in ["true", "TRUE", "True"]:
+_TRUE = {"1", "true", "t", "yes", "y", "on"}
+_FALSE = {"0", "false", "f", "no", "n", "off"}
+
+def str_to_bool(s: str | None, default: bool = False) -> bool:
+    if s is None:
+        return default
+    v = str(s).strip().lower()
+    if v in _TRUE:
         return True
-    elif string in ["false", "FALSE", "False"]:
+    if v in _FALSE:
         return False
-    else:
-        raise Exception(
-            f"{string} is not boolean, ex input true -> true, True, TRUE, ex input false -> false, False, FALSE"
-        )
+    return default
+
+def getenv_bool(key: str, default: bool = False) -> bool:
+    return str_to_bool(os.getenv(key), default)
+
+def getenv_int(key: str, default: int) -> int:
+    v = os.getenv(key)
+    try:
+        return int(v) if v is not None else default
+    except Exception:
+        return default
+
+def getenv_float(key: str, default: float) -> float:
+    v = os.getenv(key)
+    try:
+        return float(v) if v is not None else default
+    except Exception:
+        return default
 
 
 def get_first_day_of_month(date: datetime) -> datetime:
