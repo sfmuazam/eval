@@ -67,11 +67,11 @@ uv sync
 ## Skema Alur Penggunaan
 
 ### A. Offline (tanpa koneksi internet)
-- `.env`: EMBED_PROVIDER=mock, LLM_PROVIDER, USE_LLM=0
+- `.env`: EMBED_PROVIDER=mock, LLM_PROVIDER=mock, USE_LLM=0
 - POST `/rag/seed-demo`
 - Upload CV & project → POST `/upload`
 - Enqueue → POST `/evaluate`
-- Poll hasil → GET `/result/{job_id}?debug=true`
+- Poll hasil → GET `/result/{job_id}`
 
 ### B. Dengan Groq LLM + mock embeddings
 - `.env`: EMBED_PROVIDER=mock, USE_LLM=1, set GROQ_API_KEY
